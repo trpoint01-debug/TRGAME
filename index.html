@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ar" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TRGAME</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #050507;
+    overflow: hidden;
+    touch-action: none;
+    font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  }
+  #wrap {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; width: 100%;
+  }
+  canvas {
+    background: #050507;
+    touch-action: none;
+    display: block;
+  }
+  #overlay {
+    position: fixed; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    background: rgba(0,0,0,0.72);
+    color: #fff;
+    text-align: center;
+    z-index: 10;
+  }
+  #overlay h1 {
+    font-size: 8vw;
+    margin: 0 0 12px 0;
+    letter-spacing: 2px;
+    text-shadow: 0 0 18px currentColor, 0 0 40px currentColor;
+  }
+  #overlay p {
+    font-size: 4.2vw;
+    opacity: 0.85;
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+</div>
+<div id="overlay">
+  <h1 id="overlayTitle">PAUSED</h1>
+  <p id="overlaySub">اضغط للمتابعة</p>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlaySub = document.getElementById('overlaySub');
+
+  const W = 390, H = 700;
+  canvas.width = W;
+  canvas.height = H;
+
+  function resize() {
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+    const scale = Math.min(availW / W, availH / H);
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const SIDE = 34;
+  const GOAL_W = 150;
+  const GOAL_L = (W - GOAL_W) / 2;
+  const GOAL_R = (W + GOAL_W) / 2;
+  const TOP_Y = 96;
+  const BOT_Y = H - 96;
+  const NET_DEPTH = 46;
+  const MID_Y = H / 2;
+
+  const PADDLE_R = 30;
+  const BALL_R = 13;
+  const WIN_SCORE = 10;
+
+  const PINK = '#ff2fd6';
+  const GREEN = '#33ff7a';
+  const CYAN = '#3fe1ff';
+  const RED = '#ff3b3b';
+  const BALLCOL = '#4fb8ff';
+
+  let paddleTop = { x: W / 2, y: TOP_Y + 90, vx: 0, vy: 0, px: W / 2, py: TOP_Y + 90 };
+  let paddleBot = { x: W / 2, y: BOT_Y - 90, vx: 0, vy: 0, px: W / 2, py: BOT_Y - 90 };
+  let ball = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
+  let score = { top: 0, bot: 0 };
+  let paused = false;
+  let gameOver = false;
+  let pointers = {};
+
+  function resetBall(direction) {
+    ball.x = W / 2;
+    ball.y = H / 2;
+    const angle = (Math.random() * 0.7 - 0.35);
+    const speed = 4.2;
+    const dir = direction || (Math.random() < 0.5 ? 1 : -1);
+    ball.vx = Math.sin(angle) * speed;
+    ball.vy = Math.cos(angle) * speed * dir;
+  }
+  resetBall();
+
+  function resetMatch() {
+    score.top = 0; score.bot = 0;
+    gameOver = false;
+    paused = false;
+    paddleTop.x = W / 2; paddleTop.y = TOP_Y + 90;
+    paddleBot.x = W / 2; paddleBot.y = BOT_Y - 90;
+    resetBall();
+    hideOverlay();
+  }
+
+  function showOverlay(title, sub, color) {
+    overlayTitle.textContent = title;
+    overlayTitle.style.color = color || '#fff';
+    overlaySub.textContent = sub;
+    overlay.style.display = 'flex';
+  }
+  function hideOverlay() {
+    overlay.style.display = 'none';
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (gameOver) { resetMatch(); return; }
+    if (paused) { togglePause(); return; }
+    const pos = getPos(e);
+    if (Math.hypot(pos.x - pauseBtn.x, pos.y - pauseBtn.y) < pauseBtn.r + 6) return;
+    if (Math.hypot(pos.x - restartBtn.x, pos.y - restartBtn.y) < restartBtn.r + 6) return;
+    const half = pos.y < MID_Y ? 'top' : 'bot';
+    pointers[e.pointerId] = half;
+    movePaddle(half, pos.x, pos.y);
+    canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    const half = pointers[e.pointerId];
+    if (!half) return;
+    const pos = getPos(e);
+    movePaddle(half, pos.x, pos.y);
+  });
+
+  function endPointer(e) {
+    delete pointers[e.pointerId];
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  function movePaddle(half, x, y) {
+    const p = half === 'top' ? paddleTop : paddleBot;
+    let minX = SIDE + PADDLE_R, maxX = W - SIDE - PADDLE_R;
+    let minY, maxY;
+    if (half === 'top') {
+      minY = TOP_Y + PADDLE_R * 0.6;
+      maxY = MID_Y - PADDLE_R;
+    } else {
+      minY = MID_Y + PADDLE_R;
+      maxY = BOT_Y - PADDLE_R * 0.6;
+    }
+    p.x = Math.min(maxX, Math.max(minX, x));
+    p.y = Math.min(maxY, Math.max(minY, y));
+  }
+
+  const keys = {};
+  window.addEventListener('keydown', e => keys[e.key] = true);
+  window.addEventListener('keyup', e => keys[e.key] = false);
+
+  function handleKeyboard() {
+    const speed = 6;
+    if (keys['w'] || keys['W']) movePaddle('top', paddleTop.x, paddleTop.y - speed);
+    if (keys['s'] || keys['S']) movePaddle('top', paddleTop.x, paddleTop.y + speed);
+    if (keys['a'] || keys['A']) movePaddle('top', paddleTop.x - speed, paddleTop.y);
+    if (keys['d'] || keys['D']) movePaddle('top', paddleTop.x + speed, paddleTop.y);
+    if (keys['ArrowUp']) movePaddle('bot', paddleBot.x, paddleBot.y - speed);
+    if (keys['ArrowDown']) movePaddle('bot', paddleBot.x, paddleBot.y + speed);
+    if (keys['ArrowLeft']) movePaddle('bot', paddleBot.x - speed, paddleBot.y);
+    if (keys['ArrowRight']) movePaddle('bot', paddleBot.x + speed, paddleBot.y);
+  }
+
+  const pauseBtn = { x: W - 55, y: MID_Y, r: 24 };
+  const restartBtn = { x: 55, y: MID_Y, r: 24 };
+  canvas.addEventListener('pointerdown', function (e) {
+    const pos = getPos(e);
+    const d = Math.hypot(pos.x - pauseBtn.x, pos.y - pauseBtn.y);
+    if (d < pauseBtn.r + 6 && !gameOver) {
+      togglePause();
+      return;
+    }
+    const dr = Math.hypot(pos.x - restartBtn.x, pos.y - restartBtn.y);
+    if (dr < restartBtn.r + 6) {
+      resetMatch();
+    }
+  }, true);
+
+  function togglePause() {
+    paused = !paused;
+    if (paused) showOverlay('PAUSED', 'اضغط في أي مكان للمتابعة', CYAN);
+    else hideOverlay();
+  }
+
+  function update() {
+    paddleTop.vx = paddleTop.x - paddleTop.px;
+    paddleTop.vy = paddleTop.y - paddleTop.py;
+    paddleTop.px = paddleTop.x; paddleTop.py = paddleTop.y;
+
+    paddleBot.vx = paddleBot.x - paddleBot.px;
+    paddleBot.vy = paddleBot.y - paddleBot.py;
+    paddleBot.px = paddleBot.x; paddleBot.py = paddleBot.y;
+
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    const maxSpeed = 13;
+    const spd = Math.hypot(ball.vx, ball.vy);
+    if (spd > maxSpeed) {
+      ball.vx = ball.vx / spd * maxSpeed;
+      ball.vy = ball.vy / spd * maxSpeed;
+    }
+
+    if (ball.x - BALL_R < SIDE) {
+      ball.x = SIDE + BALL_R;
+      ball.vx = Math.abs(ball.vx) * 0.98;
+    } else if (ball.x + BALL_R > W - SIDE) {
+      ball.x = W - SIDE - BALL_R;
+      ball.vx = -Math.abs(ball.vx) * 0.98;
+    }
+
+    if (ball.y - BALL_R < TOP_Y) {
+      const inGoalMouth = ball.x > GOAL_L + BALL_R && ball.x < GOAL_R - BALL_R;
+      if (inGoalMouth) {
+        if (ball.y - BALL_R < TOP_Y - NET_DEPTH) {
+          score.bot++;
+          onGoalScored();
+        }
+      } else {
+        ball.y = TOP_Y + BALL_R;
+        ball.vy = Math.abs(ball.vy) * 0.98;
+      }
+    }
+
+    if (ball.y + BALL_R > BOT_Y) {
+      const inGoalMouth = ball.x > GOAL_L + BALL_R && ball.x < GOAL_R - BALL_R;
+      if (inGoalMouth) {
+        if (ball.y + BALL_R > BOT_Y + NET_DEPTH) {
+          score.top++;
+          onGoalScored();
+        }
+      } else {
+        ball.y = BOT_Y - BALL_R;
+        ball.vy = -Math.abs(ball.vy) * 0.98;
+      }
+    }
+
+    collidePaddle(paddleTop);
+    collidePaddle(paddleBot);
+  }
+
+  function collidePaddle(p) {
+    const dx = ball.x - p.x;
+    const dy = ball.y - p.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = PADDLE_R + BALL_R;
+    if (dist < minDist && dist > 0) {
+      const nx = dx / dist, ny = dy / dist;
+      ball.x = p.x + nx * minDist;
+      ball.y = p.y + ny * minDist;
+      const speedIn = Math.hypot(ball.vx, ball.vy);
+      const baseSpeed = Math.max(speedIn, 5);
+      ball.vx = nx * baseSpeed + p.vx * 0.9;
+      ball.vy = ny * baseSpeed + p.vy * 0.9;
+    }
+  }
+
+  function onGoalScored() {
+    if (score.top >= WIN_SCORE || score.bot >= WIN_SCORE) {
+      gameOver = true;
+      const winner = score.top >= WIN_SCORE ? 'الأحمر' : 'الأخضر';
+      const color = score.top >= WIN_SCORE ? RED : GREEN;
+      showOverlay(winner + ' فاز!', 'اضغط لبدء مباراة جديدة', color);
+    } else {
+      resetBall();
+    }
+  }
+
+  function glowLine(x1, y1, x2, y2, color, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function glowCircleOutline(x, y, r, color, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function glowDisc(x, y, r, color) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawNet(cx, y, w, depth, flip) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(200,200,200,0.35)';
+    ctx.lineWidth = 1;
+    const rows = 4, cols = 7;
+    for (let i = 0; i <= cols; i++) {
+      const x = cx - w / 2 + (w / cols) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + (flip ? -depth : depth));
+      ctx.stroke();
+    }
+    for (let j = 0; j <= rows; j++) {
+      const yy = y + (flip ? -depth : depth) * (j / rows);
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 2, yy);
+      ctx.lineTo(cx + w / 2, yy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#050507';
+    ctx.fillRect(0, 0, W, H);
+
+    drawNet((GOAL_L + GOAL_R) / 2, TOP_Y, GOAL_W, NET_DEPTH, true);
+    drawNet((GOAL_L + GOAL_R) / 2, BOT_Y, GOAL_W, NET_DEPTH, false);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(W / 2, MID_Y, 78, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(SIDE, MID_Y);
+    ctx.lineTo(W - SIDE, MID_Y);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.beginPath();
+    ctx.arc((GOAL_L + GOAL_R) / 2, TOP_Y, 130, 0, Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc((GOAL_L + GOAL_R) / 2, BOT_Y, 130, Math.PI, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    glowLine(SIDE, TOP_Y, SIDE, MID_Y, PINK, 6);
+    glowLine(W - SIDE, TOP_Y, W - SIDE, MID_Y, PINK, 6);
+    glowLine(SIDE, MID_Y, SIDE, BOT_Y, GREEN, 6);
+    glowLine(W - SIDE, MID_Y, W - SIDE, BOT_Y, GREEN, 6);
+
+    glowLine(SIDE, TOP_Y, GOAL_L, TOP_Y, PINK, 6);
+    glowLine(GOAL_R, TOP_Y, W - SIDE, TOP_Y, PINK, 6);
+    glowLine(SIDE, BOT_Y, GOAL_L, BOT_Y, GREEN, 6);
+    glowLine(GOAL_R, BOT_Y, W - SIDE, BOT_Y, GREEN, 6);
+
+    glowCircleOutline(paddleTop.x, paddleTop.y, PADDLE_R, RED, 6);
+    glowCircleOutline(paddleBot.x, paddleBot.y, PADDLE_R, GREEN, 6);
+
+    glowDisc(ball.x, ball.y, BALL_R, BALLCOL);
+
+    ctx.save();
+    ctx.strokeStyle = CYAN;
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(pauseBtn.x, pauseBtn.y, pauseBtn.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = CYAN;
+    ctx.fillRect(pauseBtn.x - 7, pauseBtn.y - 8, 4, 16);
+    ctx.fillRect(pauseBtn.x + 3, pauseBtn.y - 8, 4, 16);
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = CYAN;
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(restartBtn.x, restartBtn.y, restartBtn.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(restartBtn.x, restartBtn.y, 11, 0.6 * Math.PI, 2.3 * Math.PI);
+    ctx.stroke();
+    const ah = { x: restartBtn.x + 11 * Math.cos(0.6 * Math.PI), y: restartBtn.y + 11 * Math.sin(0.6 * Math.PI) };
+    ctx.beginPath();
+    ctx.moveTo(ah.x, ah.y);
+    ctx.lineTo(ah.x - 7, ah.y - 2);
+    ctx.moveTo(ah.x, ah.y);
+    ctx.lineTo(ah.x - 3, ah.y + 6);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = 'bold 22px Arial';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 14;
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '2px';
+    ctx.fillText('TRGAME', W / 2, 34);
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = 'bold 28px Arial';
+    ctx.fillStyle = RED;
+    ctx.shadowColor = RED;
+    ctx.shadowBlur = 10;
+    ctx.textAlign = 'left';
+    ctx.fillText(score.top, 20, TOP_Y - 20);
+    ctx.fillStyle = GREEN;
+    ctx.shadowColor = GREEN;
+    ctx.fillText(score.bot, 20, BOT_Y + 46);
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = '13px Arial';
+    ctx.fillStyle = CYAN;
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 8;
+    ctx.textAlign = 'right';
+    ctx.fillText('أول من يصل 10 يفوز', W - 20, TOP_Y - 20);
+    ctx.restore();
+  }
+
+  function loop() {
+    if (!paused && !gameOver) {
+      handleKeyboard();
+      update();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
