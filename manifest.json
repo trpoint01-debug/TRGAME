@@ -8,5 +8,12 @@
   "background_color": "#050507",
   "theme_color": "#050507",
   "orientation": "portrait",
-  "icons": []
+  "icons": [
+    {
+      "src": "launchericon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
