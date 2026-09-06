@@ -1,0 +1,12 @@
+{
+  "name": "TRGAME",
+  "short_name": "TRGAME",
+  "description": "لعبة هوكي جلو لشخصين",
+  "start_url": "/TRGAME/",
+  "scope": "/TRGAME/",
+  "display": "fullscreen",
+  "background_color": "#050507",
+  "theme_color": "#050507",
+  "orientation": "portrait",
+  "icons": []
+}
